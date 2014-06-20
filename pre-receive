@@ -1,0 +1,37 @@
+#!/bin/sh
+#
+# This hook is invoked by git-receive-pack on the remote repository, which 
+# happens when a git push is done on a local repository. Just before starting 
+# to update refs on the remote repository, the pre-receive hook is invoked. Its 
+# exit status determines the success or failure of the update.  It is passed 
+# arguments in through stdin in the form
+#
+#  <oldrev> <newrev> <refname>
+#
+# For example:
+#  aa453216d1b3e49e7f6f98441fa56946ddcd6a20 68f7abf4e6f922807889f52bc043ecd31b79f814 refs/heads/master
+#
+
+version=`astyle --version 2> /dev/null`
+if test "x$version" != "x"; then
+echo "SDF3 git pre-receive hook:"
+echo "Did not find astyle, please install it before continuing."
+exit 1
+fi
+ASTYLE=astyle
+
+case `$ASTYLE --version 2> /dev/null` in
+  Artistic*)
+      ;;
+  default)
+      echo "SDF3 git pre-commit hook:"
+      echo "Did not find astyle, please install it before continuing."
+      exit 1
+      ;;
+esac
+
+ASTYLE_PARAMETERS="--style=allman \
+    --indent=spaces=4 \
+    --convert-tabs \
+    --indent-classes \
+    --indent-switches \

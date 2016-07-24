@@ -1,0 +1,67 @@
+#dest.sh
+
+#!/bin/env bash
+
+destPort=$1
+
+if [ $# != 1 ]
+then
+    echo "cmd destPort"
+    echo $?
+fi
+wget https://github.com/wangbin579/tcpcopy/archive/0.9.0.tar.gz -O tcpcopy-0.9.0.tar.gz --no-check-certificate
+tar zxvf tcpcopy-0.9.0.tar.gz
+cd tcpcopy-0.9.0
+./autogen.sh
+./configure --prefix=/root/tools/tcpcopy090
+make
+make install
+
+
+#kernel module
+/sbin/modprobe ip_queue
+
+#iptables rule
+#flow from sport
+/sbin/iptables -I OUTPUT -p tcp --sport ${destPort} -j QUEUE
+
+cd /root/tools/tcpcopy090/bin; ./intercept -l /root/tools/intercept.log &
+
+#check
+/sbin/iptables -L
+
+/sbin/lsmod | grep -vP 'xt_tcpudp|iptable_filter|ip_queue'
+
+
+
+
+
+
+=============
+#source.sh
+
+
+#!/bin/env bash
+
+sourcePort=$1
+destIp=$2
+destPort=$3
+
+if [ $# != 3 ]
+then
+    echo "cmd sourcePort destIp destPort"
+    echo $?
+fi
+
+wget https://github.com/wangbin579/tcpcopy/archive/0.9.0.tar.gz -O tcpcopy-0.9.0.tar.gz --no-check-certificate
+tar zxvf tcpcopy-0.9.0.tar.gz
+cd tcpcopy-0.9.0
+./autogen.sh
+./configure --prefix=/root/tools/tcpcopy090
+make
+make install
+
+
+#iptables rule
+cd /root/tools/tcpcopy090/bin/; ./tcpcopy -x ${sourcePort}-${destIp}:${destPort} &
+

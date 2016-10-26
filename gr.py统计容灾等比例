@@ -1,0 +1,534 @@
+#!/usr/bin/env python
+#coding: utf-8
+
+import os
+import datetime
+import re
+import sys
+reload(sys)
+sys.setdefaultencoding('utf8')
+import time
+import copy
+import thread
+import logging
+import argparse
+import collections
+import string
+import commands
+
+#DATE = (datetime.datetime.now()-datetime.timedelta(hours=1)).strftime("%Y%m%d%H")
+DATE = datetime.datetime.now().strftime("%Y%m%d%H")
+#DATE = '2016101823'
+DATE_FILE = file(DATE,'a')
+LOG_NAME = 'gr.log.' + DATE
+WF_NAME = 'gr.log.wf.' + DATE
+HTML_NAME = "gr.html"
+
+class Tailer:
+    def __init__(self):
+
+        self.count = 0
+
+        self.rongzai_num = 0
+        self.response_lt_eight = 0
+
+        self.feed_count = 0
+        self.feed_num = 0
+        self.feed_set = []
+
+        self.ad_count = 0
+        self.ad_count_error = 0
+        self.ad_num = 0
+        self.ad_set = []
+
+        self.rec_count = 0
+        self.rec_count_error = 0
+        self.rec_num = 0
+        self.rec_set = []
+        self.rec_lt_five = 0
+        self.rec_empty = 0
+
+        self.disp_count = 0
+        self.disp_count_error = 0
+        self.disp_num = 0
+        self.disp_set = []
+        self.disp_lt_five = 0
+        self.disp_empty = 0
+
+        self.sofavr_count = 0
+        self.sofavr_count_error = 0
+        self.sofavr_num = 0
+        self.sofavr_set = []
+        self.sofavr_empty = 0
+
+        self.duanzi_count = 0
+        self.duanzi_count_error = 0
+        self.duanzi_num = 0
+        self.duanzi_set = []
+        self.duanzi_empty = 0
+
+        self.cf_count = 0
+        self.cf_count_error = 0
+        self.cf_num = 0
+        self.cf_set = []
+        self.cf_empty = 0
+
+        self.redis_count = 0
+        self.redis_count_error = 0
+        self.redis_error = 0
+        self.redis_news = 0
+        self.redis_video = 0
+
+
+    def prefix_redis(self):
+        a = time.strftime('%Y-%m-%d %H:%M:00',time.localtime(time.time()))
+        timeArray = time.strptime(a, "%Y-%m-%d %H:%M:%S")
+        return int(time.mktime(timeArray))
+
+    def parse_response(self, line):
+        '''
+        容灾占比，结果条数小于8条占比
+        '''
+        if line.find('"rec_src":[4]') > 0:
+            self.rongzai_num += 1
+
+        num_pattern = re.compile('.*?,\"num\"\:([0-9]+)\}')
+        num_match = num_pattern.match(line)
+        if num_match:
+           num_temp = num_match.group(1)
+           if int(num_temp) < 8:
+               self.response_lt_eight += 1
+    def get_response_num(self,line):
+        '''
+        获取下游返回的条数
+        '''
+        response_pattern = re.compile('.*?response num is \[([0-9]+)\]')
+        response_match = response_pattern.match(line)
+        if response_match:
+            response_num = response_match.group(1)
+            return int(response_num)
+        else:
+            return -1
+
+    def get_cost_time(self,line):
+        '''
+        获取处理时间
+        '''
+        cost_pattern = re.compile('.*?\[cost_ms:([0-9]+)\]')
+        cost_match = cost_pattern.match(line)
+        if cost_match:
+            cost_ms = cost_match.group(1)
+            return int(cost_ms)
+        else:
+            return -1
+
+    def get_bit_value(self,value_set):
+        '''
+        获取20,40,60,80,90分位值
+        '''
+        value_set.sort()
+        slen = len(value_set)
+        index_sort_twenty = int(slen * 0.2);
+        index_sort_forty = int(slen * 0.4);
+        index_sort_sixty = int(slen * 0.6);
+        index_sort_eighty = int(slen * 0.8);
+        index_sort_ninety = int(slen * 0.9);
+
+        twenty_value = value_set[index_sort_twenty];
+        forty_value = value_set[index_sort_forty];
+        sixty_value = value_set[index_sort_sixty];
+        eighty_value = value_set[index_sort_eighty];
+        ninety_value = value_set[index_sort_ninety];
+        return (twenty_value, forty_value, sixty_value, eighty_value, ninety_value)
+
+    def parse_feed(self, line):
+        '''
+        command=feed
+        '''
+        self.feed_count += 1
+        cost_ms = self.get_cost_time(line)
+        if cost_ms:
+            self.feed_num += cost_ms
+            self.feed_set.append(cost_ms)
+
+    def result_feed(self):
+        '''
+        feed监控结果
+        '''
+        count_temp = float(self.feed_count)
+        self.qps = count_temp / 3600
+        self.feed_average = self.feed_num / float(self.feed_count)
+        (self.feed_twenty, self.feed_forty, self.feed_sixty, self.feed_eighty, self.feed_ninety) = self.get_bit_value(self.feed_set)
+        self.rongzai_rate = self.rongzai_num  * 100 / count_temp
+        self.response_lt_eight_rate = self.response_lt_eight  * 100 / count_temp
+
+        DATE_FILE.write('gr\n')
+        DATE_FILE.write('qps\t%.2f\n' % self.qps)
+        DATE_FILE.write('容灾占比\t%.2f\n' % self.rongzai_rate)
+        DATE_FILE.write('返回条数小于8条占比\t%.2f\n' % self.rongzai_rate)
+        DATE_FILE.write('平均处理时间\t%.2f\n' % self.feed_average)
+        DATE_FILE.write('处理时间20分位值\t%d\n' % self.feed_twenty)
+        DATE_FILE.write('处理时间40分位值\t%d\n' % self.feed_forty)
+        DATE_FILE.write('处理时间60分位值\t%d\n' % self.feed_sixty)
+        DATE_FILE.write('处理时间80分位值\t%d\n' % self.feed_eighty)
+        DATE_FILE.write('处理时间90分位值\t%d\n' % self.feed_ninety)
+
+
+    def parse_rec(self, line):
+        '''
+        分析推荐
+        '''
+        self.rec_count += 1
+        cost_ms = self.get_cost_time(line)
+        if cost_ms:
+            self.rec_num += cost_ms
+            self.rec_set.append(cost_ms)
+        rec_num = line.count('\"rid\"')
+        if rec_num > 0 and rec_num < 5:
+            self.rec_lt_five += 1
+
+        if rec_num == 0:
+            self.rec_empty += 1
+
+    def result_rec(self):
+        '''
+        推荐监控结果
+        '''
+        self.rec_average = self.rec_num / self.rec_count
+        (self.rec_twenty, self.rec_forty, self.rec_sixty, self.rec_eighty, self.rec_ninety) = self.get_bit_value(self.rec_set)
+        self.rec_lt_five_rate =  self.rec_lt_five * 100 / float(self.rec_count)
+        self.rec_empty_rate =  self.rec_empty * 100 / float(self.rec_count)
+        self.rec_error_rate = self.rec_count_error * 100 / float(self.rec_count + self.rec_count_error)
+
+        DATE_FILE.write('推荐\n')
+        DATE_FILE.write('返回条数等于0条占比\t%.2f\n' % self.rec_empty_rate)
+        DATE_FILE.write('返回条数(1,5)条占比\t%.2f\n' % self.rec_lt_five_rate)
+        DATE_FILE.write('错误率占比\t%.2f\n' % self.rec_error_rate)
+        DATE_FILE.write('平均处理时间\t%.2f\n' % self.rec_average)
+        DATE_FILE.write('处理时间20分位值\t%d\n' % self.rec_twenty)
+        DATE_FILE.write('处理时间40分位值\t%d\n' % self.rec_forty)
+        DATE_FILE.write('处理时间60分位值\t%d\n' % self.rec_sixty)
+        DATE_FILE.write('处理时间80分位值\t%d\n' % self.rec_eighty)
+        DATE_FILE.write('处理时间90分位值\t%d\n' % self.rec_ninety)
+
+
+    def parse_disp(self, line):
+        '''
+        分析分发
+        '''
+        self.disp_count += 1
+        cost_ms = self.get_cost_time(line)
+        if cost_ms:
+            self.disp_num += cost_ms
+            self.disp_set.append(cost_ms)
+        disp_num = line.count('\"nid\"')
+        if disp_num > 0 and disp_num < 5:
+            self.disp_lt_five += 1
+        if disp_num == 0:
+            self.disp_empty += 1
+
+    def result_disp(self):
+        '''
+        分发监控结果
+        '''
+        self.disp_average = self.disp_num / self.disp_count
+        (self.disp_twenty, self.disp_forty, self.disp_sixty, self.disp_eighty, self.disp_ninety) = self.get_bit_value(self.disp_set)
+        self.disp_lt_five_rate =  self.disp_lt_five * 100 / float(self.disp_count)
+        self.disp_empty_rate =  self.disp_empty * 100 / float(self.disp_count)
+        self.disp_error_rate = self.disp_count_error * 100 / float(self.disp_count + self.disp_count_error)
+        DATE_FILE.write('分发\n')
+        DATE_FILE.write('返回条数等于0条占比\t%.2f\n' % self.disp_empty_rate)
+        DATE_FILE.write('返回条数(1,5)条占比\t%.2f\n' % self.disp_lt_five_rate)
+        DATE_FILE.write('错误率占比\t%.2f\n' % self.disp_error_rate)
+        DATE_FILE.write('平均处理时间\t%.2f\n' % self.disp_average)
+        DATE_FILE.write('处理时间20分位值\t%d\n' % self.disp_twenty)
+        DATE_FILE.write('处理时间40分位值\t%d\n' % self.disp_forty)
+        DATE_FILE.write('处理时间60分位值\t%d\n' % self.disp_sixty)
+        DATE_FILE.write('处理时间80分位值\t%d\n' % self.disp_eighty)
+        DATE_FILE.write('处理时间90分位值\t%d\n' % self.disp_ninety)
+
+    def parse_ad(self, line):
+        '''
+        分析凤巢
+        '''
+        self.ad_count += 1
+        cost_ms = self.get_cost_time(line)
+        if cost_ms:
+            self.ad_num += int(cost_ms)
+            self.ad_set.append(cost_ms)
+
+    def result_ad(self):
+        '''
+        凤巢监控结果
+        '''
+        self.ad_average = self.ad_num / self.ad_count
+        (self.ad_twenty, self.ad_forty, self.ad_sixty, self.ad_eighty, self.ad_ninety) = self.get_bit_value(self.ad_set)
+        self.ad_error_rate = self.ad_count_error * 100 / float(self.ad_count + self.ad_count_error)
+        DATE_FILE.write('凤巢\n')
+        DATE_FILE.write('错误率占比\t%.2f\n' % self.ad_error_rate)
+        DATE_FILE.write('平均处理时间\t%.2f\n' % self.ad_average)
+        DATE_FILE.write('处理时间20分位值\t%d\n' % self.ad_twenty)
+        DATE_FILE.write('处理时间40分位值\t%d\n' % self.ad_forty)
+        DATE_FILE.write('处理时间60分位值\t%d\n' % self.ad_sixty)
+        DATE_FILE.write('处理时间80分位值\t%d\n' % self.ad_eighty)
+        DATE_FILE.write('处理时间90分位值\t%d\n' % self.ad_ninety)
+
+    def parse_sofavr(self, line):
+        '''
+        分析短视频
+        '''
+        self.sofavr_count += 1
+        cost_ms = self.get_cost_time(line)
+        if cost_ms:
+            self.sofavr_num += int(cost_ms)
+            self.sofavr_set.append(cost_ms)
+        sofavr_num = line.count('\"rid\"')
+        if sofavr_num == 0:
+            self.sofavr_empty += 1
+
+    def result_sofavr(self):
+        '''
+        短视频监控结果
+        '''
+        self.sofavr_average = self.sofavr_num / self.sofavr_count
+        (self.sofavr_twenty, self.sofavr_forty, self.sofavr_sixty, self.sofavr_eighty, self.sofavr_ninety) = self.get_bit_value(self.sofavr_set)
+        self.sofavr_empty_rate =  self.sofavr_empty * 100 / float(self.sofavr_count)
+        self.sofavr_error_rate = self.sofavr_count_error * 100 / float(self.sofavr_count + self.sofavr_count_error)
+        DATE_FILE.write('短视频\n')
+        DATE_FILE.write('返回条数等于0条占比\t%.2f\n' % self.sofavr_empty_rate)
+        DATE_FILE.write('错误率占比\t%.2f\n' % self.sofavr_error_rate)
+        DATE_FILE.write('平均处理时间\t%.2f\n' % self.sofavr_average)
+        DATE_FILE.write('处理时间20分位值\t%d\n' % self.sofavr_twenty)
+        DATE_FILE.write('处理时间40分位值\t%d\n' % self.sofavr_forty)
+        DATE_FILE.write('处理时间60分位值\t%d\n' % self.sofavr_sixty)
+        DATE_FILE.write('处理时间80分位值\t%d\n' % self.sofavr_eighty)
+        DATE_FILE.write('处理时间90分位值\t%d\n' % self.sofavr_ninety)
+
+
+    def parse_cf(self, line):
+        '''
+        分析协同
+        '''
+        self.cf_count += 1
+        cost_ms = self.get_cost_time(line)
+        if cost_ms:
+            self.cf_num += int(cost_ms)
+            self.cf_set.append(cost_ms)
+        response_num = self.get_response_num(line)
+        if response_num == 0:
+            self.cf_empty += 1
+
+    def result_cf(self):
+        '''
+        协同监控结果
+        '''
+        self.cf_average = self.cf_num / float(self.cf_count)
+        (self.cf_twenty, self.cf_forty, self.cf_sixty, self.cf_eighty, self.cf_ninety) = self.get_bit_value(self.cf_set)
+        self.cf_empty_rate = self.cf_empty * 100 / float(self.cf_count)
+        self.cf_error_rate = self.sofavr_count_error * 100 / float(self.cf_count + self.cf_count_error)
+        DATE_FILE.write('协同\n')
+        DATE_FILE.write('返回条数等于0条占比\t%.2f\n' % self.cf_empty_rate)
+        DATE_FILE.write('错误率占比\t%.2f\n' % self.cf_error_rate)
+        DATE_FILE.write('平均处理时间\t%.2f\n' % self.cf_average)
+        DATE_FILE.write('处理时间20分位值\t%d\n' % self.cf_twenty)
+        DATE_FILE.write('处理时间40分位值\t%d\n' % self.cf_forty)
+        DATE_FILE.write('处理时间60分位值\t%d\n' % self.cf_sixty)
+        DATE_FILE.write('处理时间80分位值\t%d\n' % self.cf_eighty)
+        DATE_FILE.write('处理时间90分位值\t%d\n' % self.cf_ninety)
+
+    def parse_duanzi(self, line):
+        '''
+        分析段子
+        '''
+        self.duanzi_count += 1
+        cost_ms = self.get_cost_time(line)
+        if cost_ms:
+            self.duanzi_num += int(cost_ms)
+            self.duanzi_set.append(cost_ms)
+
+        response_num = self.get_response_num(line)
+        if response_num == 0:
+            self.duanzi_empty += 1
+
+    def result_duanzi(self):
+        '''
+        段子监控结果
+        '''
+        self.duanzi_average = self.duanzi_num / self.duanzi_count
+        (self.duanzi_twenty, self.duanzi_forty, self.duanzi_sixty, self.duanzi_eighty, self.duanzi_ninety) = self.get_bit_value(self.duanzi_set)
+        self.duanzi_empty_rate = self.duanzi_empty * 100 / float(self.duanzi_count)
+        self.duanzi_error_rate = self.duanzi_count_error * 100 / float(self.duanzi_count + self.duanzi_count_error)
+        DATE_FILE.write('段子\n')
+        DATE_FILE.write('返回条数等于0条占比\t%.2f\n' % self.duanzi_empty_rate)
+        DATE_FILE.write('错误率占比\t%.2f\n' % self.duanzi_error_rate)
+        DATE_FILE.write('平均处理时间\t%.2f\n' % self.duanzi_average)
+        DATE_FILE.write('处理时间20分位值\t%d\n' % self.duanzi_twenty)
+        DATE_FILE.write('处理时间40分位值\t%d\n' % self.duanzi_forty)
+        DATE_FILE.write('处理时间60分位值\t%d\n' % self.duanzi_sixty)
+        DATE_FILE.write('处理时间80分位值\t%d\n' % self.duanzi_eighty)
+        DATE_FILE.write('处理时间90分位值\t%d\n' % self.duanzi_ninety)
+
+    def parse_redis(self, line):
+        '''
+        分析redis
+        '''
+        self.redis_count += 1
+
+        news_pattern = re.compile('.*?\[redis_issued_news_num:([0-9]+)\]')
+        news_match = news_pattern.match(line)
+        if news_match:
+            news_num = news_match.group(1)
+            if int(news_num) == 2000:
+                self.redis_news += 1
+
+        video_pattern = re.compile('.*?\[redis_issued_videos_num:([0-9]+)\]')
+        video_match = video_pattern.match(line)
+        if video_match:
+            video_num = video_match.group(1)
+            if int(video_num) == 800:
+                self.redis_video += 1
+
+    def result_redis(self):
+        '''
+        redis结果
+        '''
+        self.news_maxed_rate = self.redis_news * 100 / float(self.redis_count)
+        self.video_maxed_rate = self.redis_video * 100 / float(self.redis_count)
+        self.redis_error_rate = self.redis_count_error * 100 / float(self.feed_count)
+
+        DATE_FILE.write('redis\n')
+        DATE_FILE.write('错误率占比\t%.2f\n' % self.redis_error_rate)
+        DATE_FILE.write('新闻已下发历史2000条占比\t%.2f\n' % self.news_maxed_rate)
+        DATE_FILE.write('视频已下发历史800条占比\t%.2f\n' % self.video_maxed_rate)
+
+    def write_html(self):
+        '''
+        生成html文件
+        '''
+        DATE_FILE.close()
+        if os.path.exists(HTML_NAME):
+            os.remove(HTML_NAME)
+
+        HTML_FILE = file(HTML_NAME,'a')
+        html_str="<html>\n<head>\n<meta http-equiv=\"Content-Type\" content=\"text/html; charset=utf8\"/>\n<body>\n<table border='1'>\n"
+        html_str+="<tr><th>模块</th><th>核心指标</th><th>"+DATE+"</th>\n"
+
+        result_file = file(DATE, 'r')
+        line_index = 0
+        model_name = ""
+        first_col = ""
+        second_col= ""
+        line_th = ""
+        while True:
+            line = result_file.readline()
+            if line:
+               line_str = line.split('\n')[0].split('\t')
+               if len(line_str) == 1:
+                   if line_index > 0:
+                      html_str += "<tr><th  rowspan=\""+ str(line_index) +"\">" + model_name+ "</th><td>"+first_col+"</td><td>"+second_col+"</td></tr>\n"
+                      html_str += line_th
+                      html_str += "<tr height=2></tr>\n"
+                      line_th = ""
+                      first_col = ""
+                      second_col = ""
+                      line_index = 0
+                   model_name = line_str[0]
+               else:
+                   line_index += 1
+                   if first_col == "":
+                       first_col = line_str[0]
+                       second_col = line_str[1]
+                   else:
+                       line_th += "<tr><td>"+line_str[0]+"</td><td>"+line_str[1]+"</td></tr>\n"
+            else:
+                html_str += "<tr><th  rowspan=\""+ str(line_index) +"\">" + model_name+ "</th><td>"+first_col+"</td><td>"+second_col+"</td></tr>\n"
+                html_str += line_th
+                break
+        html_str+="</table>\n</body>\n</html>\n"
+
+        HTML_FILE.write(html_str)
+        HTML_FILE.close()
+
+
+    def check(self):
+        log_file = file(LOG_NAME, 'r')
+        log_wf_file = file(WF_NAME, 'r')
+        while True:
+            line = log_wf_file.readline()
+            if line:
+                if line.find('call_rec') > 0:
+                   self.rec_count_error += 1
+                if line.find('call_ad') > 0:
+                   self.ad_count_error += 1
+                if line.find('call_disp') > 0:
+                    self.disp_count_error += 1
+                if line.find('call_sofavr') > 0:
+                    self.sofavr_count_error += 1
+                if line.find('call_cf') > 0:
+                    self.cf_count_error += 1
+                if line.find('call_duanzi') > 0:
+                    self.duanzi_count_error += 1
+                if line.find('command:redis') > 0:
+                    self.redis_count_error += 1
+            else:
+                break
+
+
+        while True :
+            line = log_file.readline()
+            if line:
+                if line.find('command:feed') > 0:
+                    record = self.parse_feed(line)
+                if line.find('response detail infos') > 0:
+                    record = self.parse_response(line)
+                if line.find('command:call_ad') > 0:
+                    record = self.parse_ad(line)
+                if line.find('command:call_rec') > 0:
+                    record = self.parse_rec(line)
+                if line.find('command:call_disp') > 0:
+                    record = self.parse_disp(line)
+                if line.find('command:call_sofavr') > 0:
+                    record = self.parse_sofavr(line)
+                if line.find('command:call_duanzi') > 0:
+                    record = self.parse_duanzi(line)
+                if line.find('command:call_cf') > 0:
+                    record = self.parse_cf(line)
+                if line.find('redis_issued_news_num') > 0:
+                    record = self.parse_redis(line)
+            else:
+                break
+
+        self.result_feed()
+        self.result_redis()
+        self.result_ad()
+        self.result_rec()
+        self.result_disp()
+        self.result_sofavr()
+        self.result_duanzi()
+        #self.result_cf()
+        time.sleep(60)
+        self.write_html()
+
+if __name__ == "__main__":
+    #date = ['2016101900', '2016101901', '2016101902', '2016101903', '2016101904', '2016101905', '2016101906', '2016101907', '2016101908', '2016101909', '2016101910', '2016101911', '2016101912', '2016101913', '2016101914', '2016101915']
+
+    #for i in date:
+        #DATE = i
+        #DATE_FILE = file(i,'a')
+        #LOG_NAME = 'gr.log.' + i
+        #WF_NAME = 'gr.log.wf.' + i
+
+    wget_log_str = "wget bjyz-feed13.bjyz.baidu.com:/home/work/gr/log/" + LOG_NAME
+    wget_wf_str = "wget bjyz-feed13.bjyz.baidu.com:/home/work/gr/log/" + WF_NAME
+
+    os.system(wget_log_str)
+    os.system(wget_wf_str)
+
+
+    Tailer().check()
+
+    if os.path.exists(WF_NAME):
+        os.remove(WF_NAME)
+
+    if os.path.exists(LOG_NAME):
+        os.remove(LOG_NAME)

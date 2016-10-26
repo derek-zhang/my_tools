@@ -1,0 +1,196 @@
+#!/usr/bin/env python
+#coding:utf-8
+
+import pymysql
+import os
+import sys
+reload(sys)
+#import file
+
+class GR_Monitor:
+
+    def __init__(self,path):
+        MYSQL_HOST = "10.95.41.22"
+        MYSQl_PORT = 3307
+        USER = 'root'
+        PASSWD = 'root'
+        DB = 'feedevadb'
+        CHARSET = 'utf8'
+        self.path = path
+        self.conn = pymysql.connect(host=MYSQL_HOST, port=MYSQl_PORT, user=USER, passwd=PASSWD, db=DB, charset=CHARSET)
+        self.conn.autocommit(True)
+        self.gr = []
+        self.vertical = []
+        self.redis = []
+        self.monitor = []
+
+    def mysql_execute(self):
+        if len(self.gr) > 0:
+            gr_sql = 'insert into gr_gr(time_current,machine,qps,disaster_ratio,redis_news, redis_svideo, average_time,twenty_bit_value,forty_bit_value,sixty_bit_value,eighty_bit_value,ninety_bit_value) values(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)'
+        if len(self.vertical) > 0:
+            vertical_sql = 'insert into gr_vertical(time_current,machine,vertical_name,num_equal_zero,num_less_five,error_ratio,average_time,twenty_bit_value,forty_bit_value,sixty_bit_value,eighty_bit_value,ninety_bit_value) values(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)'
+        if len(self.monitor) > 0:
+            monitor_sql = 'insert into gr_monitor(key_indicators,machine,time_current,value_current,remarks) values(%s,%s,%s,%s,%s)'
+        cursor=self.conn.cursor()
+        cursor.executemany(gr_sql,self.gr)
+        cursor.executemany(vertical_sql,self.vertical)
+        cursor.executemany(monitor_sql,self.monitor)
+        cursor.close()
+
+    def file_parser(self):
+        for parent,dirnames,filenames in os.walk(self.path):
+            for filename in filenames:
+                time_current = filename
+                machine = 'bj'
+
+                full_path_name = os.path.join(parent,filename)
+                size = os.path.getsize(full_path_name)
+                gr_file = open(full_path_name)
+                gr_file.seek(0, os.SEEK_SET)
+                gr_str = gr_file.read(size)
+
+                gr_pos = gr_str.find('gr')
+                redis_pos =  gr_str.find('redis')
+                ad_pos =  gr_str.find('凤巢')
+                rec_pos =  gr_str.find('推荐')
+                disp_pos =  gr_str.find('分发')
+                svideo_pos =  gr_str.find('短视频')
+
+                duanzi_pos =  gr_str.find('段子')
+                #redis
+                gr_file.seek(redis_pos,os.SEEK_SET)
+                gr_gr = gr_file.read(ad_pos-redis_pos)
+                gr_line = gr_gr.split('\n')
+                redis_list = []
+                for i in range(len(gr_line)):
+                    gr_split = gr_line[i].split('\t')
+                    if len(gr_split) > 1:
+                        redis_list.append(gr_split[1])
+                #gr处理
+                gr_file.seek(gr_pos,os.SEEK_SET)
+                gr_gr = gr_file.read(redis_pos-gr_pos)
+                gr_line = gr_gr.split('\n')
+                gr_list = []
+                for i in range(len(gr_line)):
+                    gr_split = gr_line[i].split('\t')
+                    if len(gr_split) > 1:
+                        gr_list.append(gr_split[1])
+                gr_temp = (time_current, machine, gr_list[0], float(gr_list[1]), redis_list[1], redis_list[2], float(gr_list[3]), gr_list[4],gr_list[5],gr_list[6], gr_list[7], gr_list[8])
+                self.gr.append(gr_temp)
+                if float(gr_list[1]) > 3:
+                   monitor_temp = ('容灾占比', machine, time_current,  gr_list[1], '超过3%')
+                   self.monitor.append(monitor_temp)
+                if float(gr_list[3]) > 400:
+                   monitor_temp = ('gr平均处理时间', machine, time_current,  gr_list[3], '超过400ms')
+                   self.monitor.append(monitor_temp)
+
+                #ad处理
+                gr_file.seek(ad_pos,os.SEEK_SET)
+                gr_ad = gr_file.read(rec_pos-ad_pos)
+                ad_line = gr_ad.split('\n')
+                ad_list = []
+                for i in range(len(ad_line)):
+                    ad_split = ad_line[i].split('\t')
+                    if len(ad_split) > 1:
+                        ad_list.append(ad_split[1])
+                ad_temp = (time_current, machine, 'ad', -1, -1, ad_list[0], ad_list[1], ad_list[2], ad_list[3], ad_list[4], ad_list[5], ad_list[6])
+                self.vertical.append(ad_temp)
+                if float(ad_list[0]) > 5:
+                   monitor_temp = ('请求凤巢失败占比', machine, time_current,  ad_list[0], '超过5%')
+                   self.monitor.append(monitor_temp)
+                if float(gr_list[1]) > 320:
+                   monitor_temp = ('凤巢平均处理时间', machine, time_current,  gr_list[1], '超过320ms')
+                   self.monitor.append(monitor_temp)
+
+                #rec处理
+                gr_file.seek(rec_pos,os.SEEK_SET)
+                gr_rec = gr_file.read(disp_pos-rec_pos)
+                rec_line = gr_rec.split('\n')
+                rec_list = []
+                for i in range(len(rec_line)):
+                    rec_split = rec_line[i].split('\t')
+                    if len(rec_split) > 1:
+                        rec_list.append(rec_split[1])
+                rec_temp = (time_current, machine, 'rec', rec_list[0], rec_list[1], rec_list[2], rec_list[3], rec_list[4], rec_list[5], rec_list[6], rec_list[7], rec_list[8])
+                self.vertical.append(rec_temp)
+                if float(rec_list[0]) > 1:
+                   monitor_temp = ('推荐返回0条占比', machine, time_current,  rec_list[0], '超过1%')
+                   self.monitor.append(monitor_temp)
+                if float(rec_list[1]) > 3:
+                   monitor_temp = ('推荐返回(1,5)条占比', machine, time_current,  rec_list[1], '超过3%')
+                   self.monitor.append(monitor_temp)
+                if float(rec_list[2]) > 1:
+                   monitor_temp = ('请求推荐失败占比', machine, time_current,  rec_list[2], '超过1%')
+                   self.monitor.append(monitor_temp)
+                if float(rec_list[3]) > 60:
+                   monitor_temp = ('推荐平均处理时间', machine, time_current,  rec_list[3], '超过60ms')
+                   self.monitor.append(monitor_temp)
+                #disp处理
+                gr_file.seek(disp_pos,os.SEEK_SET)
+                gr_rec = gr_file.read(svideo_pos-disp_pos)
+                rec_line = gr_rec.split('\n')
+                rec_list = []
+                for i in range(len(rec_line)):
+                    rec_split = rec_line[i].split('\t')
+                    if len(rec_split) > 1:
+                        rec_list.append(rec_split[1])
+                rec_temp = (time_current, machine, 'disp', rec_list[0], rec_list[1], rec_list[2], rec_list[3], rec_list[4], rec_list[5], rec_list[6], rec_list[7], rec_list[8])
+                self.vertical.append(rec_temp)
+                if float(rec_list[0]) > 35:
+                   monitor_temp = ('分发返回0条占比', machine, time_current,  rec_list[0], '超过35%')
+                   self.monitor.append(monitor_temp)
+                if float(rec_list[1]) > 30:
+                   monitor_temp = ('分发返回(1,5)条占比', machine, time_current,  rec_list[1], '超过30%')
+                   self.monitor.append(monitor_temp)
+                if float(rec_list[2]) > 1:
+                   monitor_temp = ('请求分发失败占比', machine, time_current,  rec_list[2], '超过1%')
+                   self.monitor.append(monitor_temp)
+                if float(rec_list[3]) > 150:
+                   monitor_temp = ('分发平均处理时间', machine, time_current,  rec_list[3], '超过150ms')
+                   self.monitor.append(monitor_temp)
+                #svideo处理
+                gr_file.seek(svideo_pos,os.SEEK_SET)
+                gr_rec = gr_file.read(duanzi_pos-svideo_pos)
+                rec_line = gr_rec.split('\n')
+                rec_list = []
+                for i in range(len(rec_line)):
+                    rec_split = rec_line[i].split('\t')
+                    if len(rec_split) > 1:
+                        rec_list.append(rec_split[1])
+                rec_temp = (time_current, machine, 'svideo', rec_list[0], -1, rec_list[1], rec_list[2], rec_list[3], rec_list[4], rec_list[5], rec_list[6], rec_list[7])
+                self.vertical.append(rec_temp)
+                if float(rec_list[0]) > 1:
+                   monitor_temp = ('短视频返回0条占比', machine, time_current,  rec_list[0], '超过1%')
+                   self.monitor.append(monitor_temp)
+                if float(rec_list[1]) > 1:
+                   monitor_temp = ('请求短视频失败占比', machine, time_current,  rec_list[1], '超过1%')
+                   self.monitor.append(monitor_temp)
+                if float(rec_list[2]) > 40:
+                   monitor_temp = ('短视频平均处理时间', machine, time_current,  rec_list[2], '超过40ms')
+                   self.monitor.append(monitor_temp)
+                #duanzi处理
+                gr_file.seek(duanzi_pos,os.SEEK_SET)
+                gr_rec = gr_file.read(size-duanzi_pos)
+                rec_line = gr_rec.split('\n')
+                rec_list = []
+                for i in range(len(rec_line)):
+                    rec_split = rec_line[i].split('\t')
+                    if len(rec_split) > 1:
+                        rec_list.append(rec_split[1])
+                rec_temp = (time_current, machine, 'duanzi', rec_list[0], -1, rec_list[1], rec_list[2], rec_list[3], rec_list[4], rec_list[5], rec_list[6], rec_list[7])
+                self.vertical.append(rec_temp)
+                if float(rec_list[0]) > 78:
+                   monitor_temp = ('段子返回0条占比', machine, time_current,  rec_list[0], '超过78%')
+                   self.monitor.append(monitor_temp)
+                if float(rec_list[1]) > 1:
+                   monitor_temp = ('请求段子失败占比', machine, time_current,  rec_list[1], '超过1%')
+                   self.monitor.append(monitor_temp)
+                if float(rec_list[2]) > 10:
+                   monitor_temp = ('段子平均处理时间', machine, time_current,  rec_list[2], '超过10ms')
+                   self.monitor.append(monitor_temp)
+
+        self.mysql_execute()
+
+
+if __name__ == "__main__":
+    gr = GR_Monitor('/home/work/gr_monitor/gr').file_parser() 

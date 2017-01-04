@@ -3,7 +3,7 @@
 资源释放
 校验
 配置
-长短连接（双工，半双工）
+长短连接（双工，半双工），是否会影响延迟等
 网卡流量、打满，多队列
 sort compare 函数自反性 
 （compare这个functor的意思是less-than，换句话说compare_recent_clicks(a, a) = false，你这里是true，不符合反自反性）

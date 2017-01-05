@@ -9,6 +9,11 @@
 =======遇到的坑=======
 1. 长短连接（双工，半双工），是否会影响延迟等
    网卡流量、打满，多队列
+   遇到的问题是，访问redis cluster延迟高，超时率高，读耗时也会上百ms
+   原因：与Twemproxy是单链接导致。ksarch redis cluster。主在北京，广州机房写入的是bj，读是本地，由于直接请求的是Twemproxy，
+   比如一写一读，写被转发到master，读是本地，然后Twemproxy 顺序返回，导致读得等写返回
+   单链接的话就会有这个问题，如果是短连接就会缓解，更好的可能是读写分为两个链接，这样不影响
+   
 2. 现象-----std::sort里面core：
    看是否自定义了compare，sort compare 要满足函数反自反性 
   （compare这个functor的意思是less-than，换句话说compare_recent_clicks(a, a) = false，你这里是true，不符合反自反性）

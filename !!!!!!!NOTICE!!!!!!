@@ -1,13 +1,18 @@
 ！！！checklist && 坑！！！
 
-资源释放
-校验
-配置
-长短连接（双工，半双工），是否会影响延迟等
-网卡流量、打满，多队列
-sort compare 函数自反性 
+1.资源释放
+2.有效性校验
+3.配置是否都修改了
+4.长短连接（双工，半双工），是否会影响延迟等
+   网卡流量、打满，多队列
+5. sort compare 函数自反性 
 （compare这个functor的意思是less-than，换句话说compare_recent_clicks(a, a) = false，你这里是true，不符合反自反性）
-
-
+6. map的operator [] 有副作用，当使用这个查询，不存在的key，会导致插入一条value为default值的pair，会导致读变为写。
+   所以之前的core是，加读锁读，但是错用了operator []，导致了实际上是并发写了
+   
+   
+   
+   
+   
 bigpipe和dstream 扩容是需要提前一周排期
 mola， redis 扩容提前一星期

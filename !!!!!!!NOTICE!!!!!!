@@ -9,6 +9,11 @@
 （compare这个functor的意思是less-than，换句话说compare_recent_clicks(a, a) = false，你这里是true，不符合反自反性）
 6. map的operator [] 有副作用，当使用这个查询，不存在的key，会导致插入一条value为default值的pair，会导致读变为写。
    所以之前的core是，加读锁读，但是错用了operator []，导致了实际上是并发写了
+   看一下cppreference上面的data race：
+   The container is accessed, and potentially modified.
+The function accesses an element and returns a reference that can be used to modify its mapped value. 
+Concurrently accessing other elements is safe.
+    注意这里面写的是accessing other elements is safe，也就是说访问相同的key会出问题的
    
    
    

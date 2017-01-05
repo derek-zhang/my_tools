@@ -21,3 +21,55 @@ Concurrently accessing other elements is safe.
    
 bigpipe和dstream 扩容是需要提前一周排期
 mola， redis 扩容提前一星期
+
+
+
+Protobuf相关
+内存管理问题:
+Protobuf中运用了std::string，同时RepeatedField采用了类似vector的内存管理方式，在生命周期内，内存分配都是只增不减的。所以一个对象如果长时间不释放，而且内部结构变化很大且非常频繁，会导致内存占用逐渐上升。
+解决办法：如果是线程级数据，可以每隔一段时间主动释放一下内存。如果是指针，delete掉重新new一个，如果是成员变量，可以用Swap接口。
+历史case：nova-as oom，导致锁定上线近一个月。
+枚举类型使用问题：
+在protobuf中使用枚举类型，protobuf在set和Parse过程会对传入的枚举值做校验，如果枚举值在定义范围之外，且未定义NDEBUG宏，那么就会抛出FatalException，如果程序未catch住异常，就会导致程序出core。
+这要求我们在使用枚举类型作为接口变量的时候，特别小心：
+1、  升级proto接口中的枚举值时，下游先于上游升级，或者先升级枚举值定义，上下游都上线后再开始使用；
+2、  定义NDEBUG宏
+3、  使用try catch处理异常
+历史case：bfp4app的net字段输入非法，导致程序出core。
+增减字段的问题：
+Protobuf是根据字段定义下标来序列化、反序列化数据的，而不是根据字段的名称。如果将proto的两个字段下标互换，那么用新版的proto解析老板的数据，这两个字段的值也会交换（在可解析的情况下，如果不可解析，这个字段会被放到unknown字段里）。
+在增减字段的过程中，下标尽量不要复用，否则会造成新老版本的数据不兼容或者错乱。
+历史Case：adx接口winnotice等字段升级，新字段用了删除字段的下标，上线后上下游之间由于proto文件版本不一致导致逻辑错误。
+脏数据
+Module的reset方法，线程级数据的reset函数，都需要特别关注，新增变的时候一定要关注这种变量有没有reset。
+历史case：数不胜数
+Memset（bzero）
+和上面的脏数据不同，有的同学有洁癖，所有的数组、结构体，甚至类一上来都memset一把。这个其实有些有不必要的性能浪费，有些还会出现bug。
+字符串不用memset，第一个字节清0就可以了
+大段内存清0影响性能，之前测试过如果对5M的内存进行memset。那空循环的server，QPS也不过千。要避免这种情况的出现。
+不要对class（包括带方法的struct）memset，如果类有虚函数，他的虚函数表也会被清空，调用虚函数会出core
+不要std容器类型memset，会导致执行结果undefined，根据std的不同实现，可能出现内存泄漏，也可能出core。
+Struct尽量不要嵌套class，避免class被memset 。
+历史case：mobads-as memset vector导致内存泄露；lu-as因为memset vector导致内存泄漏。
+数值溢出：
+如果不是特殊情况，计数器、下标、表示内存偏移量的变量尽量不要使用uint8和uint16，因为其取值范围太小了，很容易出现数值溢出，导致死循环或者内存地址错误的问题。推荐使用uint32甚至uint64。
+Std容器的size都是size_t类型，在64位系统上就是uint64，比较时注意。
+*注：如果是内存词表等大量数据，还是按实际取值范围选择合适的int类型，以节约内存。
+历史case：cb-ui的内存偏移量溢出，导致出core；lu_as的计数器溢出，导致死循环，内存泄漏。
+移位操作与类型转换：
+C中的’>>’和’<<’运算符都是算术位移，有符号类型的右移一定要注意符号位，负数右移第一位补的是1。无符号类型不涉及该问题。
+同理，有符号类型在类型强制换行的过程中，也需要注意符号的问题。
+Searchid，s1，s2这种可能需要位移、拼接的变量，还是用无符号数比较合适。
+迭代器（地址）失效：
+String，vector，deque，stack等容器，在大小发生变化，重新分配内存之后，迭代器和元素地址均会失效，这点需要注意。
+Map，set，linklist等容器不存在这个问题。
+历史case：nova-ui曾经因为这个core过
+Snprintf返回值：
+Snprintf在正常情况下，返回的是输出字符串的长度（不含末尾的‘\0’），在snprintf输出内容被截断的到时候，返回的是输出字符串截断前的长度。
+历史case:暂无记录
+Select系列接口的限制：
+使用select系列接口进行socket通信，需要注意fd的值最大只支持到1023，再大的值将会导致写越界出core。
+历史case: libfcgi中的select调用导致被bfp4app出core
+ccode的历史bug：
+ccode中的gbk2utf8接口，存在历史bug，如果最后一个两个字节正好是一个汉字，那么就存在一个字节的读越界，在某些极端情况下会导致程序出core。该bug已报告inf但是无人修复。
+历史case:bfp4app，lu-ui都因为这个core过

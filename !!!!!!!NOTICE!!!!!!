@@ -17,6 +17,8 @@
 2. 现象-----std::sort里面core：
    看是否自定义了compare，sort compare 要满足函数反自反性 
   （compare这个functor的意思是less-than，换句话说compare_recent_clicks(a, a) = false，你这里是true，不符合反自反性）
+   PS.查找core的过程，使用AddressSanitizer，发现挂载lexical_cast里面，遂注释掉，再run，又是另外一个lexical_cast，
+   这个不能注释，就用istringstream重写了功能，再run，发现core在sort里面，再看代码，发现了问题
 3. 现象-----map里面死循环了 or map里面core：
    说明map有并发写，map内部结构被破坏了；或者遍历时有删除；或者自定义了less than
    map的operator [] 有副作用，当使用这个查询，不存在的key，会导致插入一条value为default值的pair，会导致读变为写。

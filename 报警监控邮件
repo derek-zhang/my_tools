@@ -1,0 +1,58 @@
+#!/bin/bash
+
+MAILTO="xx@xx.com xx@xx.com"
+SENDER="xx@xx.com"
+MOBILE="13333333333"
+NP_DIR="/home/work/novelparser"
+NP_LOG="$NP_DIR/log/novelparser.log"
+LOG="log/np.log.`date +%Y%m%d`"
+APP="novelparser"
+DATE=`date +"%Y-%m-%d %H:%M:%S"`
+TIME=`date +"%H:%M:%S"`
+HOST=`hostname | sed 's/\.bd\.com//'`
+
+log() {
+	echo "$1 `date +"%Y-%m-%d %H:%M:%S"` $2" >> "$LOG"
+}
+
+gsm() {
+	for M in $MOBILE
+	do
+		/bin/gsmsend-script "$M@$@"
+	done
+}
+
+alarm() {
+	gsm "[$HOST][np][$TIME] $1"
+	echo "$2" | mutt -s "[$APP][$HOST][$DATE] $1" -e "my_hdr from:$SENDER" -e "my_hdr content-type:text/html charset:gb2312" renbobo@baidu.com zhangluxin@baidu.com
+}
+
+get_tot_num() {
+    grep "ErrorInfo" tmp | wc -l | awk "{print $1}"
+}
+
+get_fail_num() {
+    grep "ErrorInfo" tmp | grep -v -i "success" | wc -l | awk "{print $1}"
+}
+
+get_np_fail_rate() {
+    awk 'BEGIN{printf "%.2f\n", '$1'/'$2'}'
+}
+
+rm -rf ./tmp
+cp -rp $NP_LOG ./tmp
+
+tot=`get_tot_num`
+fail=`get_fail_num`
+fail_rate=`get_np_fail_rate $fail $tot`
+
+html_data="<HTML><BODY>"
+html_data=$html_data"<TABLE BORDER=\"1\">"
+html_data=$html_data"<TR><TD><B>Host</B></TD><TD><B>Fail</B></TD><TD><B>Total</B></TD><TD><B>FailRate</B></TD></TR>"
+html_data=$html_data"<TR><TD>"$HOST"</TD><TD>"$fail"</TD><TD>"$tot"</TD><TD>"$fail_rate"</TD></TR>"
+html_data=$html_data"</TABLE>"
+html_data=$html_data"</BODY></HTML>"
+
+#if [ $(echo "$fail_rate > 0.10"|bc) -eq 1 ]; then
+    alarm "[$fail/$tot] fail_rate:$fail_rate" "$html_data"
+#fi
